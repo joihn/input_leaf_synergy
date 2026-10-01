@@ -1,15 +1,17 @@
 # Input Leaf 🍃
 
+This fork adds **Synergy 3 support**. Use its [signed release APK](https://github.com/joihn/input_leaf_synergy/releases/latest) and [Synergy setup guide](docs/synergy3-android.md).
+
 **Use your PC's mouse and keyboard to control your Android phone or tablet over Wi-Fi/LAN.** Input Leaf is a free, open-source Android client for **Input Leap** and compatible **Deskflow** setups — no USB cables and no root required.
 
-[![Latest Release](https://img.shields.io/github/v/release/anasvhora284/input-leaf?display_name=tag&sort=semver&style=flat&color=3DDC84)](https://github.com/anasvhora284/input-leaf/releases/latest)
+[![Latest Release](https://img.shields.io/github/v/release/joihn/input_leaf_synergy?display_name=tag&sort=semver&style=flat&color=3DDC84)](https://github.com/joihn/input_leaf_synergy/releases/latest)
 [![GitHub Stars](https://img.shields.io/github/stars/anasvhora284/input-leaf?style=flat&color=blue)](https://github.com/anasvhora284/input-leaf/stargazers)
 [![CI Status](https://img.shields.io/github/actions/workflow/status/anasvhora284/input-leaf/ci.yml?branch=master&style=flat)](https://github.com/anasvhora284/input-leaf/actions/workflows/ci.yml)
 [![Platform](https://img.shields.io/badge/Platform-Android_8.0%2B-brightgreen?logo=android&logoColor=white)](https://github.com/anasvhora284/input-leaf)
 [![Root Status](https://img.shields.io/badge/Root-Not_Required-informational)](https://shizuku.rikka.app/)
 [![License](https://img.shields.io/github/license/anasvhora284/input-leaf)](LICENSE)
 
-**[Download APK](https://github.com/anasvhora284/input-leaf/releases/latest) · [Website](https://inputleaf.anasvhora.tech/) · [Quick Start](#quick-start) · [Input Leap Guide](docs/input-leap-android.md) · [Deskflow Guide](docs/deskflow-android.md) · [Troubleshooting](#troubleshooting) · [Issues](https://github.com/anasvhora284/input-leaf/issues)**
+**[Download APK](https://github.com/joihn/input_leaf_synergy/releases/latest) · [Website](https://inputleaf.anasvhora.tech/) · [Quick Start](#quick-start) · [Input Leap Guide](docs/input-leap-android.md) · [Deskflow Guide](docs/deskflow-android.md) · [Troubleshooting](#troubleshooting) · [Issues](https://github.com/anasvhora284/input-leaf/issues)**
 
 > PC mouse + keyboard -> Local Network (Wi-Fi/LAN) -> Android phone / tablet  
 > Move your desktop cursor off the edge of your monitor to smoothly glide onto your Android screen.
@@ -105,7 +107,7 @@ Download and install either:
 > - [Complete Deskflow on Android Setup Guide](docs/deskflow-android.md)
 
 ### 3. Install Input Leaf on Android
-1. Download the latest `input-leaf_<version>_universal.apk` from [GitHub Releases](https://github.com/anasvhora284/input-leaf/releases/latest).
+1. Download the latest `input-leaf_<version>_universal.apk` from [GitHub Releases](https://github.com/joihn/input_leaf_synergy/releases/latest).
 2. Open the APK on your Android device and tap **Install**.
 
 ### 4. Choose an Input Injection Engine

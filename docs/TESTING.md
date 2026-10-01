@@ -36,6 +36,30 @@ keytool -genkeypair -keystore app/input-leaf.jks -storepass inputleaf123 -keypas
   -alias input-leaf -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Input Leaf"
 ```
 
+## Build a signed release APK
+
+For distribution from this Synergy fork, build the release variant:
+
+```sh
+./gradlew :app:assembleRelease
+```
+
+The universal APK is written to `app/build/dist/release/`. Release builds are
+non-debuggable and have Android/JVM coverage instrumentation disabled. Debug
+builds show a `-debug` version suffix and remain suitable for instrumented tests.
+Protocol event tracing is enabled only in debug builds.
+
+Use the same gitignored `app/input-leaf.jks` when building updates; generating a
+new signing key would prevent installation over existing builds. Never commit or
+upload the keystore. The fork's in-app update checker uses
+`joihn/input_leaf_synergy`, so it does not direct users to an upstream APK that
+lacks the Synergy changes.
+
+Before publishing, verify the release APK's signature and non-debuggable manifest,
+and confirm that its signer matches the previous distributed build. GitHub release
+notes should identify the source commit and APK SHA-256. Upload only release-variant
+APKs to the latest release.
+
 ## Test locations and conventions
 
 ### Android app

@@ -3,6 +3,7 @@ package com.inputleaf.android.ui
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import com.inputleaf.android.BuildConfig
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import com.inputleaf.android.update.InstallSource
@@ -74,9 +75,9 @@ fun SettingsScreen(
     val cursorAvailable = canDrawOverlays || accessibilityAvailable
     val versionName = remember(context) {
         try {
-            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.4.2"
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: BuildConfig.VERSION_NAME
         } catch (_: Exception) {
-            "1.4.2"
+            BuildConfig.VERSION_NAME
         }
     }
     val installSource = remember(context) { UpdateService.getInstallSource(context) }

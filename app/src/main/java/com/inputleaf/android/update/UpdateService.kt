@@ -5,6 +5,7 @@ import android.content.pm.InstallSourceInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
+import com.inputleaf.android.BuildConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -39,12 +40,21 @@ data class VersionChangelog(
 object UpdateService {
 
     internal const val GITHUB_API_LATEST_RELEASE =
-        "https://api.github.com/repos/anasvhora284/input-leaf/releases/latest"
+        "https://api.github.com/repos/joihn/input_leaf_synergy/releases/latest"
     internal const val FDROID_MARKET_URI = "market://details?id=com.inputleaf.android"
     internal const val GITHUB_RELEASES_WEB_URL =
-        "https://github.com/anasvhora284/input-leaf/releases/latest"
+        "https://github.com/joihn/input_leaf_synergy/releases/latest"
 
     private val RELEASES = listOf(
+        VersionChangelog(
+            versionName = "1.4.3",
+            versionCode = 9,
+            highlights = listOf(
+                "Connect to Synergy 3 on macOS with Shizuku input on Android.",
+                "Keep saved servers across app restarts and reconnect using certificate-verified hostname IP caches.",
+                "Discover changed IP addresses with the Bonjour helper and support IPv6-to-IPv4 fallback.",
+            ),
+        ),
         VersionChangelog(
             versionName = "1.4.2",
             versionCode = 8,
@@ -235,10 +245,10 @@ internal fun resolveInstallSource(installerPackage: String?): InstallSource {
 }
 
 internal fun versionNameFrom(packageInfo: PackageInfo?): String =
-    packageInfo?.versionName ?: "1.4.2"
+    packageInfo?.versionName ?: BuildConfig.VERSION_NAME
 
 internal fun versionCodeFrom(packageInfo: PackageInfo?, sdkInt: Int = Build.VERSION.SDK_INT): Long {
-    if (packageInfo == null) return 8L
+    if (packageInfo == null) return BuildConfig.VERSION_CODE.toLong()
     return if (sdkInt >= Build.VERSION_CODES.P) {
         packageInfo.longVersionCode
     } else {

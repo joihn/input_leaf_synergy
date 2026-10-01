@@ -22,8 +22,8 @@ android {
         applicationId = "com.inputleaf.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 8
-        versionName = "1.4.2"
+        versionCode = 9
+        versionName = "1.4.3"
         // JUnit4 runner so the androidTest classes are discovered on the emulator
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -42,9 +42,13 @@ android {
             // Use project keystore so debug APKs can always update over each other
             // regardless of which machine built them
             signingConfig = signingConfigs.getByName("release")
+            versionNameSuffix = "-debug"
             enableAndroidTestCoverage = true
         }
         release {
+            isDebuggable = false
+            enableAndroidTestCoverage = false
+            enableUnitTestCoverage = false
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("release")
         }
@@ -56,6 +60,7 @@ android {
     }
     
     buildFeatures { 
+        buildConfig = true
         compose = true
         aidl = true  // Enable AIDL for Shizuku IPC
     }

@@ -11,9 +11,12 @@ Mac private key needs to be copied to Android.
 
 ## Set up the phone
 
-1. Install an APK built from this branch. A locally signed development APK may
-   require uninstalling a differently signed release first; that removes its
-   settings and generates a new client certificate.
+1. Install the signed **release** APK from this fork's
+   [latest GitHub release](https://github.com/joihn/input_leaf_synergy/releases/latest).
+   Version 1.4.3 is non-debuggable and uses the same signing key as the earlier
+   Synergy debug builds, so install it as an update to preserve settings and the
+   client certificate. An APK signed by a different publisher cannot update this
+   installation in place.
 2. Start Shizuku, authorize Input Leaf, and select Shizuku in Input Leaf.
 3. In Input Leaf **Settings → This device's fingerprint**, copy the **complete
    SHA-256 fingerprint**. The shortened Settings summary is insufficient.

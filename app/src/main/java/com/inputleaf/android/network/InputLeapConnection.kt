@@ -1,6 +1,7 @@
 package com.inputleaf.android.network
 
 import android.util.Log
+import com.inputleaf.android.BuildConfig
 import com.inputleaf.android.model.InputLeapEvent
 import com.inputleaf.android.protocol.ProtocolConstants
 import com.inputleaf.android.protocol.ProtocolParser
@@ -33,7 +34,7 @@ private const val TLS_CLIENT_AUTH_HANDSHAKE_TIMEOUT_MS = 90_000
 private const val PLAIN_CONNECT_TIMEOUT_CACHED_MS = 800
 private const val PLAIN_CONNECT_TIMEOUT_MS = 2_000
 
-private fun logD(message: String) { runCatching { Log.d(TAG, message) } }
+private fun logD(message: String) { if (BuildConfig.DEBUG) runCatching { Log.d(TAG, message) } }
 private fun logW(message: String) { runCatching { Log.w(TAG, message) } }
 private fun logE(message: String) { runCatching { Log.e(TAG, message) } }
 

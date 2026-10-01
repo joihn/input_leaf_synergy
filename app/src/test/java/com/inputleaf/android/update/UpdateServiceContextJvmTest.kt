@@ -1,6 +1,7 @@
 package com.inputleaf.android.update
 
 import android.content.Context
+import com.inputleaf.android.BuildConfig
 import android.content.pm.InstallSourceInfo
 import android.os.Build
 import androidx.test.core.app.ApplicationProvider
@@ -25,7 +26,7 @@ class UpdateServiceContextJvmTest {
 
     @Test
     fun getCurrentVersion_readsInstalledVersion() {
-        assertThat(UpdateService.getCurrentVersion(context)).isEqualTo("1.4.2")
+        assertThat(UpdateService.getCurrentVersion(context)).isEqualTo(BuildConfig.VERSION_NAME)
     }
 
     @Test

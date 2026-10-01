@@ -5,6 +5,7 @@ import android.content.pm.InstallSourceInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
+import com.inputleaf.android.BuildConfig
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
@@ -88,7 +89,7 @@ class UpdateServiceTest {
     @Test
     fun versionNameFrom_usesPackageInfoOrFallback() {
         assertThat(versionNameFrom(PackageInfo().apply { versionName = "2.0.0" })).isEqualTo("2.0.0")
-        assertThat(versionNameFrom(null)).isEqualTo("1.4.2")
+        assertThat(versionNameFrom(null)).isEqualTo(BuildConfig.VERSION_NAME)
     }
 
     @Test
@@ -98,7 +99,7 @@ class UpdateServiceTest {
             versionCode = 42
         }
         assertThat(versionCodeFrom(packageInfo)).isEqualTo(42L)
-        assertThat(versionCodeFrom(null)).isEqualTo(8L)
+        assertThat(versionCodeFrom(null)).isEqualTo(BuildConfig.VERSION_CODE.toLong())
     }
 
     @Test
@@ -430,7 +431,7 @@ class UpdateServiceTest {
     @Test
     fun changelogProvider_fallsBackToLatestKnownRelease() {
         val changelog = UpdateService.getChangelog("9.9.9")
-        assertThat(changelog.versionName).isEqualTo("1.4.2")
+        assertThat(changelog.versionName).isEqualTo("1.4.3")
     }
 
     @Test
