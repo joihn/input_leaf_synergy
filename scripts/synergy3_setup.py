@@ -8,6 +8,7 @@ prints the settings database (which also contains the Synergy license).
 import argparse
 import copy
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -34,14 +35,83 @@ def core_name(computer):
     return f"{name}-{suffix}" if name else suffix
 
 
-def show_phone_settings(name, screen):
+def usable_ipv4(value):
+    try:
+        address = ipaddress.IPv4Address(value)
+    except ipaddress.AddressValueError:
+        return False
+    return not (address.is_loopback or address.is_link_local or address.is_unspecified
+                or address.is_multicast or address.is_reserved)
+
+
+def lan_addresses_from_ifconfig(output):
+    """Collect active Ethernet/Wi-Fi/bridge IPv4 addresses, excluding VPN/tunnel interfaces."""
+    addresses = []
+    blocks = re.split(r"(?=^[^\s:]+: flags=)", output, flags=re.MULTILINE)
+    for block in blocks:
+        header = re.match(r"((?:en|bridge)\d+): flags=\d+<([^>]+)>", block)
+        if not header or "UP" not in header[2].split(",") or "status: inactive" in block:
+            continue
+        for value in re.findall(r"^\s+inet\s+(\S+)", block, flags=re.MULTILINE):
+            candidate = (header[1], value)
+            if usable_ipv4(value) and candidate not in addresses:
+                addresses.append(candidate)
+    return addresses
+
+
+def detect_lan_addresses():
+    try:
+        result = subprocess.run(["/sbin/ifconfig", "-a"], check=True, capture_output=True,
+                                text=True, timeout=3)
+        return lan_addresses_from_ifconfig(result.stdout)
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+
+def show_mac_settings(settings):
+    computers = settings.get("computers", [])
+    own = next((c for c in computers if c["id"] == settings.get("myId")), None)
+    primary = next((c for c in computers if c["id"] == settings.get("mainID", {}).get("id")), None)
+    print()
+    print(f"This Mac: {own['name']}" if own else "This Mac:")
+    addresses = detect_lan_addresses()
+    if addresses:
+        print("LAN IPv4 address hints for this Mac:")
+        for interface, address in addresses:
+            print(f"    {address} ({interface})")
+        print("Use the address on the same network as the phone; reachability is not tested.")
+    else:
+        print("LAN IP not detected. Check macOS System Settings → Network → Wi-Fi/Ethernet → Details → TCP/IP.")
+    if own and primary and own["id"] != primary["id"]:
+        print(f"This Mac is SECONDARY. Connect Input Leaf to the current primary, {primary['name']}, instead.")
+        primary_ip = settings.get("local_computers", {}).get(primary["id"])
+        if isinstance(primary_ip, str) and usable_ipv4(primary_ip):
+            print(f"Current primary's last-known LAN IP: {primary_ip} (verify on that Mac).")
+    else:
+        print("When this Mac is primary, use its LAN IP in Input Leaf → Add Server (port 24800 is automatic).")
+    own_fp = own.get("misc", {}).get("tlsFingerprint") if own else None
+    try:
+        normalized = fingerprint(own_fp) if isinstance(own_fp, str) else None
+    except ValueError:
+        normalized = None
+    if normalized:
+        print("This Mac's server certificate SHA-256:")
+        print("    " + ":".join(normalized[i:i+2].upper() for i in range(0, 64, 2)))
+        print("Compare this fingerprint only when connecting to THIS Mac.")
+    else:
+        print("This Mac's server fingerprint is not available in the settings.")
+    print("Find it in Synergy Settings → Security (under Advanced) → This computer → Fingerprint.")
+    print("Compare all 64 hex digits with Input Leaf's Trust This Server dialog; ignore spaces, colons and case.")
+
+
+def show_phone_settings(name, screen, settings):
     print()
     print(f"Synergy display name: {name}")
     print("On Android, open Input Leaf → Settings → Screen name and enter exactly:")
     print(f"    {screen}")
     print("The Synergy display name and Input Leaf screen name are different.")
     print("Input Leaf → Settings → Connection security: TLS only (Auto also works).")
-    print("Add Server: enter this Mac's LAN IP only; port 24800 is automatic.")
+    show_mac_settings(settings)
 
 
 def show_status(settings, name):
@@ -67,7 +137,7 @@ def show_status(settings, name):
         print("Keyboard/mouse sharing is connected. The missing desktop management link only explains the gray Synergy tile; no action is needed for input sharing.")
     elif core == "unknown" or core not in labels:
         print("Run this command on the primary Mac to see the input connection status.")
-    show_phone_settings(phone["name"], core_name(phone))
+    show_phone_settings(phone["name"], core_name(phone), settings)
 
 
 def read_live_settings():
@@ -204,8 +274,6 @@ def main():
         database, local = (json.loads(originals[name]) for name in ("db.json", "local.json"))
         updated, updated_local, screen = prepare(database, local, args.name, args.fingerprint, args.side)
         print(f"Phone SHA-256: {fingerprint(args.fingerprint)}")
-        primary = next(c for c in database["data"]["computers"] if c["id"] == local["myId"])
-        print(f"Server SHA-256: {primary['misc'].get('tlsFingerprint', 'Check Synergy Security settings')}")
         if updated == database and updated_local == local:
             print("Already registered; no changes needed.")
         elif args.apply:
@@ -214,7 +282,7 @@ def main():
             print("Start Synergy, then complete the phone settings below.")
         else:
             print("Preview only. After verifying the phone fingerprint, stop Synergy's service and rerun with --apply.")
-        show_phone_settings(args.name, screen)
+        show_phone_settings(args.name, screen, {**database["data"], "myId": local["myId"]})
     except (OSError, ValueError, KeyError, StopIteration, subprocess.SubprocessError) as error:
         action = "read status" if args.status else "register phone"
         parser.exit(1, f"Cannot {action}: {error}\n")

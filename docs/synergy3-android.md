@@ -42,7 +42,10 @@ python3 scripts/synergy3_setup.py \
 
 Choose `above`, `below`, `left`, or `right`. The preview prints the exact core
 screen name to use in Input Leaf, for example `androidphone-c32a6d0e`, and the
-Mac's fingerprint. The final instructions distinguish the Synergy display name
+Mac's fingerprint and active LAN IPv4 address hints. If multiple addresses are
+shown, choose the one on the same network as the phone. VPN, loopback, and
+link-local addresses are excluded; these are hints, not a connectivity test.
+The final instructions distinguish the Synergy display name
 from the exact value to enter in **Input Leaf → Settings → Screen name**, and
 are also printed after applying or rerunning an existing registration.
 No files are changed without `--apply`.
@@ -73,7 +76,8 @@ After checking the fingerprint against the phone:
 6. Add the Mac's LAN IP in Input Leaf's **Add Server** dialog. Enter only the IP
    address, without a port suffix: this APK automatically uses port **24800** and
    does not expose a port selector. Verify the Mac fingerprint in Input Leaf
-   against Synergy's Security settings before accepting it.
+   against **Synergy Settings → Security (under Advanced) → This computer →
+   Fingerprint** before accepting it; see the comparison steps below.
 7. Move the Mac pointer across the configured edge to enter Android.
 
 Rerunning the helper with the same name and fingerprint makes no changes. If you
@@ -83,6 +87,27 @@ name; its screen identity and position are retained.
 To undo registration, stop Synergy's service, restore **both** JSON files from
 the printed backup directory, then reopen Synergy. A full restore also reverts
 any subsequent settings changes, so use it before making unrelated edits.
+
+## Verify the server fingerprint on the Mac
+
+Input Leaf's **Trust This Server?** dialog shows the certificate fingerprint
+presented by the Mac. Verify it using the Mac you are actually connecting to:
+
+1. Open Synergy's **Settings**.
+2. In the sidebar's **Advanced** section, select **Security**.
+3. Under **This computer**, find **Fingerprint** (below the TLS controls).
+4. Compare all **64 hexadecimal digits** with Input Leaf's dialog, then tap
+   **Trust** only if they match. Synergy groups digits with spaces; Input Leaf
+   uses colons. Spaces, colons, and uppercase/lowercase do not affect the value.
+
+Use **This computer → Fingerprint** for this check. Entries under **Other
+computers** represent trusted clients, including the phone, and are different
+certificates. Mac A and Mac B each have their own server fingerprint.
+
+The helper also prints **This Mac's server certificate SHA-256**, formatted like
+Input Leaf, during registration and with `--status`. It identifies the local Mac
+and warns if another Mac is primary, so you do not compare one Mac's fingerprint
+against the other's connection. It never prints certificate private keys.
 
 ## Switch the primary between two Macs
 
@@ -125,8 +150,11 @@ python3 scripts/synergy3_setup.py --status --name android-phone
 ```
 
 Use the display name currently shown in Synergy for `--name`. This command only
-reads the local service API and prints the selected phone's status and setup
-instructions. It also works if you have renamed the phone in Synergy; renaming
+reads the local service API and local network interfaces, and prints the selected
+phone's status, the local Mac's LAN address hints and fingerprint, and setup
+instructions. If run on a secondary Mac, it also identifies the primary and its
+last-known IP when available; verify that address on the primary Mac.
+It also works if you have renamed the phone in Synergy; renaming
 changes its core screen name, which must then be updated in Input Leaf.
 
 ### Why the Synergy tile can stay gray while input works

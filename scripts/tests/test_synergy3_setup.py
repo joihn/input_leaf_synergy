@@ -28,6 +28,11 @@ def fixture():
 
 
 class SetupTest(unittest.TestCase):
+    def setUp(self):
+        addresses = patch.object(setup, 'detect_lan_addresses', return_value=[('en0', '192.168.1.10')])
+        addresses.start()
+        self.addCleanup(addresses.stop)
+
     def test_status_uses_live_core_state_not_saved_connected_flag(self):
         database, local, _ = setup.prepare(*fixture(), 'Phone', FP)
         settings = database['data']
@@ -166,6 +171,85 @@ class SetupTest(unittest.TestCase):
             (directory / 'db.json').write_bytes(b'new')
             with self.assertRaisesRegex(ValueError, 'Settings changed'):
                 setup.apply_changes(directory, {'db.json': b'old'}, {})
+
+
+class AddressHintsTest(unittest.TestCase):
+    def test_selects_active_lan_addresses_without_tunnels_or_loopback(self):
+        output = '''lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
+    inet 127.0.0.1 netmask 0xff000000
+en0: flags=8863<UP,BROADCAST,RUNNING,MULTICAST> mtu 1500
+    inet6 fe80::1%en0 prefixlen 64
+    inet 192.168.1.10 netmask 0xffffff00 broadcast 192.168.1.255
+    inet 192.168.1.10 netmask 0xffffff00 broadcast 192.168.1.255
+    status: active
+en1: flags=8863<UP,BROADCAST,RUNNING,MULTICAST> mtu 1500
+    inet 10.0.0.5 netmask 0xffffff00
+    status: active
+utun4: flags=8051<UP,POINTOPOINT,RUNNING,MULTICAST> mtu 1380
+    inet 100.64.0.1 --> 100.64.0.1 netmask 0xffff0000
+awdl0: flags=8943<UP,BROADCAST,RUNNING,MULTICAST> mtu 1500
+    inet 10.1.0.1 netmask 0xffffff00
+bridge0: flags=8863<UP,BROADCAST,RUNNING,MULTICAST> mtu 1500
+    inet 192.168.2.1 netmask 0xffffff00
+    status: inactive
+en2: flags=8862<BROADCAST,RUNNING,MULTICAST> mtu 1500
+    inet 10.2.0.1 netmask 0xffffff00
+    status: inactive
+'''
+        self.assertEqual(setup.lan_addresses_from_ifconfig(output), [('en0', '192.168.1.10'), ('en1', '10.0.0.5')])
+
+    def test_rejects_unusable_ipv4_but_allows_lan_bridges(self):
+        for value in ['127.0.0.1', '169.254.1.2', '0.0.0.0', '224.0.0.1', '255.255.255.255', '::1', 'invalid']:
+            self.assertFalse(setup.usable_ipv4(value), value)
+        self.assertEqual(setup.lan_addresses_from_ifconfig('''bridge0: flags=8863<UP,BROADCAST,RUNNING,MULTICAST> mtu 1500
+    inet 169.254.1.2 netmask 0xffff0000
+    inet 192.168.2.10 netmask 0xffffff00
+    status: active
+'''), [('bridge0', '192.168.2.10')])
+
+    def test_interface_lookup_failures_do_not_prevent_setup_instructions(self):
+        for failure in [OSError('unavailable'), setup.subprocess.TimeoutExpired('ifconfig', 3)]:
+            with patch.object(setup.subprocess, 'run', side_effect=failure):
+                self.assertEqual(setup.detect_lan_addresses(), [])
+                with patch('sys.stdout', new_callable=io.StringIO) as output:
+                    setup.show_mac_settings({})
+            self.assertIn('LAN IP not detected', output.getvalue())
+            self.assertIn('Fingerprint', output.getvalue())
+
+    def test_secondary_mac_does_not_present_its_address_or_fingerprint_as_the_primary(self):
+        database, local = fixture()
+        settings = database['data']
+        settings['myId'] = local['myId']
+        other = {'id': 'b' * 64, 'name': 'Other Mac', 'misc': {'tlsFingerprint': '12' * 32}}
+        settings['computers'].append(other)
+        settings['mainID']['id'] = other['id']
+        settings['local_computers'] = {other['id']: '192.168.1.68'}
+        with patch.object(setup, 'detect_lan_addresses', return_value=[('en0', '192.168.1.10')]), \
+             patch('sys.stdout', new_callable=io.StringIO) as output:
+            setup.show_mac_settings(settings)
+        result = output.getvalue()
+        self.assertIn('This Mac is SECONDARY', result)
+        self.assertIn('current primary, Other Mac', result)
+        self.assertIn('last-known LAN IP: 192.168.1.68', result)
+        self.assertIn('192.168.1.10 (en0)', result)
+        self.assertIn(':'.join(['CD'] * 32), result)
+        self.assertNotIn(':'.join(['12'] * 32), result)
+        self.assertIn('only when connecting to THIS Mac', result)
+
+    def test_primary_mac_displays_its_own_fingerprint_and_malformed_values_are_not_trusted(self):
+        database, local = fixture()
+        settings = {**database['data'], 'myId': local['myId']}
+        with patch.object(setup, 'detect_lan_addresses', return_value=[('en0', '192.168.1.10')]), \
+             patch('sys.stdout', new_callable=io.StringIO) as output:
+            setup.show_mac_settings(settings)
+        self.assertIn(':'.join(['CD'] * 32), output.getvalue())
+        self.assertNotIn('SECONDARY', output.getvalue())
+        settings['computers'][0]['misc']['tlsFingerprint'] = 'not-a-fingerprint'
+        with patch.object(setup, 'detect_lan_addresses', return_value=[]), \
+             patch('sys.stdout', new_callable=io.StringIO) as output:
+            setup.show_mac_settings(settings)
+        self.assertIn('fingerprint is not available', output.getvalue())
+        self.assertNotIn('not-a-fingerprint', output.getvalue())
 
 
 if __name__ == '__main__':
