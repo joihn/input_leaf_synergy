@@ -84,6 +84,37 @@ To undo registration, stop Synergy's service, restore **both** JSON files from
 the printed backup directory, then reopen Synergy. A full restore also reverts
 any subsequent settings changes, so use it before making unrelated edits.
 
+## Switch the primary between two Macs
+
+Add both Macs' LAN IPs in Input Leaf, and connect to the one currently acting as
+Synergy's primary. Input Leaf has one active input connection and does not follow
+Synergy primary changes automatically; reconnecting continues to use the selected
+IP until you choose a different server.
+
+The phone's screen entry and layout are shared by Synergy, but **trusted client
+certificates are local to each Mac**. Seeing the phone in Mac B's layout does not
+mean Mac B already trusts it. To prepare Mac B once:
+
+1. Let Synergy sync the phone entry, then choose Mac B as primary.
+2. Copy the setup helper to Mac B and run it there with the **same `--name` and
+   phone fingerprint** used on Mac A. Stop Mac B's GUI and background service
+   before applying with `--apply`, using the procedure above, then reopen Synergy.
+   The helper reuses the existing phone identity and position and adds the
+   fingerprint to Mac B's local trust store. Do not copy Mac A's `local.json` or
+   private certificate to Mac B.
+3. On Android, disconnect from Mac A, add/select Mac B's LAN IP, and connect.
+   Verify Mac B's own server fingerprint against its Synergy Security settings
+   before accepting it. Keep the same Input Leaf screen name.
+
+After both Macs are prepared, changing primary requires selecting that Mac's
+server entry in Input Leaf. Switching back to Mac A uses its original entry and
+previously trusted certificate.
+
+Changing the primary does not rearrange the screen layout. If the phone is below
+Mac A, moving off Mac B's bottom edge will not enter the phone. Move through Mac A
+and then down to the phone, or place the phone adjacent to Mac B in Synergy's layout
+editor if you want a direct edge from B.
+
 ## Check the screen name and connection status
 
 With Synergy running on the primary Mac, you can retrieve the current screen
