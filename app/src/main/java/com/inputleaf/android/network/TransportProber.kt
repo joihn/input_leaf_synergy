@@ -6,7 +6,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.io.DataInputStream
-import java.net.InetSocketAddress
+import java.net.InetAddress
 import java.net.Socket
 import javax.net.ssl.SSLException
 import javax.net.ssl.SSLSocket
@@ -28,11 +28,12 @@ object TransportProber {
     suspend fun detect(
         host: String,
         port: Int = ProtocolConstants.DEFAULT_PORT,
+        resolveAddresses: (String) -> Array<InetAddress> = InetAddress::getAllByName,
     ): ServerSecurityMode =
         withContext(Dispatchers.IO) {
             coroutineScope {
-                val tls = async { probeTls(host, port) }
-                val plain = async { probePlainHello(host, port) }
+                val tls = async { probeTls(host, port, resolveAddresses) }
+                val plain = async { probePlainHello(host, port, resolveAddresses) }
                 val tlsResult = tls.await()
                 if (tlsResult != TlsProbeResult.Failed) {
                     plain.cancel()
@@ -62,11 +63,12 @@ object TransportProber {
             if (plainHello) ServerSecurityMode.PLAIN else ServerSecurityMode.TLS
     }
 
-    private fun probeTls(host: String, port: Int): TlsProbeResult = try {
+    private fun probeTls(host: String, port: Int, resolve: (String) -> Array<InetAddress>): TlsProbeResult = try {
         val sslContext = TlsFingerprintManager.buildCapturingSSLContext { }
-        val sslSocket = sslContext.socketFactory.createSocket() as SSLSocket
+        val sslSocket = ServerSocketConnector.connect(host, port, PROBE_TIMEOUT_MS, resolve) {
+            sslContext.socketFactory.createSocket() as SSLSocket
+        }
         sslSocket.use { sock ->
-            sock.connect(InetSocketAddress(host, port), PROBE_TIMEOUT_MS)
             sock.soTimeout = PROBE_TIMEOUT_MS
             sock.startHandshake()
             TlsProbeResult.Success
@@ -86,9 +88,8 @@ object TransportProber {
     private fun isTlsHandshake(error: Exception): Boolean =
         generateSequence<Throwable>(error) { it.cause }.any { it is SSLException }
 
-    private fun probePlainHello(host: String, port: Int): Boolean = try {
-        Socket().use { socket ->
-            socket.connect(InetSocketAddress(host, port), PROBE_TIMEOUT_MS)
+    private fun probePlainHello(host: String, port: Int, resolve: (String) -> Array<InetAddress>): Boolean = try {
+        ServerSocketConnector.connect(host, port, PROBE_TIMEOUT_MS, resolve) { Socket() }.use { socket ->
             socket.soTimeout = PROBE_TIMEOUT_MS
             socket.tcpNoDelay = true
             val din = DataInputStream(socket.inputStream)

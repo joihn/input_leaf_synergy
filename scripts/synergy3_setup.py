@@ -2,7 +2,8 @@
 """Register an Input Leaf client or inspect its Synergy 3.7 connection (macOS).
 
 Registration requires a stopped service to apply; --status reads the running
-service. Dry-run by default. Never reads or copies certificate private keys, and never
+service; --advertise keeps Bonjour discovery active until Ctrl+C.
+Dry-run by default. Never reads or copies certificate private keys, and never
 prints the settings database (which also contains the Synergy license).
 """
 import argparse
@@ -145,6 +146,25 @@ def read_live_settings():
         return json.load(response)["data"]
 
 
+def advertise_bonjour():
+    result = subprocess.run(["/usr/sbin/scutil", "--get", "LocalHostName"],
+                            check=True, capture_output=True, text=True, timeout=3)
+    hostname = result.stdout.strip()
+    if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", hostname):
+        raise ValueError("Cannot read a valid local hostname. Check macOS General → Sharing → Local hostname.")
+    print(f"Bonjour hostname for this Mac: {hostname}.local", flush=True)
+    print("Use that name in Input Leaf → Add Server when this Mac is Synergy's primary.", flush=True)
+    print("Keep this command running to advertise the name. Ctrl+C stops it; nothing is installed at login.", flush=True)
+    print("After one successful TLS connection, the latest Input Leaf saves the verified IP. You can then stop this command and restart it if the address changes.", flush=True)
+    print("Synergy must still be running; this command only advertises its input port.", flush=True)
+    try:
+        service_name = f"Input Leaf on {hostname}"[:63]
+        subprocess.run(["/usr/bin/dns-sd", "-R", service_name,
+                        "_input-leaf._tcp", "local.", "24800"], check=True)
+    except KeyboardInterrupt:
+        print("\nBonjour advertisement stopped.")
+
+
 def overlaps(a, b):
     return (a["left"] < b["left"] + b["width"] and b["left"] < a["left"] + a["width"]
             and a["top"] < b["top"] + b["height"] and b["top"] < a["top"] + a["height"])
@@ -259,10 +279,14 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--apply", action="store_true", help="Write backed-up settings; requires a stopped Synergy service")
     mode.add_argument("--status", action="store_true", help="Show live input status and the exact screen name from the running local Synergy service")
+    mode.add_argument("--advertise", action="store_true", help="Keep this Mac's Bonjour hostname advertised until Ctrl+C (no settings changes)")
     args = parser.parse_args()
-    if not args.status and not args.fingerprint:
-        parser.error("--fingerprint is required for registration (or use --status to inspect an existing phone)")
+    if not (args.status or args.advertise) and not args.fingerprint:
+        parser.error("--fingerprint is required for registration (or use --status or --advertise)")
     try:
+        if args.advertise:
+            advertise_bonjour()
+            return
         if args.status:
             try:
                 settings = read_live_settings()
@@ -284,7 +308,7 @@ def main():
             print("Preview only. After verifying the phone fingerprint, stop Synergy's service and rerun with --apply.")
         show_phone_settings(args.name, screen, {**database["data"], "myId": local["myId"]})
     except (OSError, ValueError, KeyError, StopIteration, subprocess.SubprocessError) as error:
-        action = "read status" if args.status else "register phone"
+        action = "advertise Bonjour" if args.advertise else "read status" if args.status else "register phone"
         parser.exit(1, f"Cannot {action}: {error}\n")
 
 

@@ -252,5 +252,30 @@ en2: flags=8862<BROADCAST,RUNNING,MULTICAST> mtu 1500
         self.assertNotIn('not-a-fingerprint', output.getvalue())
 
 
+class BonjourAdvertisementTest(unittest.TestCase):
+    def test_advertisement_needs_no_fingerprint_and_never_changes_synergy_settings(self):
+        hostname = setup.subprocess.CompletedProcess([], 0, stdout='MacBook-A\n')
+        with patch('sys.argv', ['synergy3_setup.py', '--advertise']), \
+             patch.object(setup.subprocess, 'run', side_effect=[hostname, KeyboardInterrupt()]) as run, \
+             patch.object(setup, 'apply_changes') as apply, \
+             patch.object(setup, 'read_live_settings') as read, \
+             patch('sys.stdout', new_callable=io.StringIO) as output:
+            setup.main()
+        self.assertIn('MacBook-A.local', output.getvalue())
+        self.assertIn('advertisement stopped', output.getvalue())
+        command = run.call_args_list[-1].args[0]
+        self.assertEqual(command[0], '/usr/bin/dns-sd')
+        self.assertIn('_input-leaf._tcp', command)
+        self.assertEqual(command[-1], '24800')
+        apply.assert_not_called()
+        read.assert_not_called()
+
+    def test_invalid_hostname_does_not_start_an_advertisement(self):
+        for hostname in ['', 'bad name', '-bad', 'bad-', 'a' * 64]:
+            with patch.object(setup.subprocess, 'run', return_value=setup.subprocess.CompletedProcess([], 0, stdout=hostname)) as run:
+                with self.assertRaises(ValueError): setup.advertise_bonjour()
+            self.assertEqual(run.call_count, 1)
+
+
 if __name__ == '__main__':
     unittest.main()

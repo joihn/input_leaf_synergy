@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.google.common.truth.Truth.assertThat
+import com.inputleaf.android.network.CachedServerAddress
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -19,6 +20,58 @@ import java.io.File
 
 class AppPreferencesTest {
     @get:Rule val folder = TemporaryFolder()
+
+    @Test fun `verified addresses for two Mac hostnames survive restart and update independently`() = runBlocking {
+        val a = CachedServerAddress("192.168.1.10", "ab".repeat(32))
+        val b = CachedServerAddress("192.168.1.68", "cd".repeat(32))
+        withPreferences { prefs, _ ->
+            prefs.saveFingerprint("mac-a.local", a.fingerprint)
+            prefs.saveFingerprint("mac-b.local", b.fingerprint)
+            prefs.saveCachedAddress("mac-a.local", a)
+            prefs.saveCachedAddress("mac-b.local", b)
+        }
+        withPreferences { prefs, _ ->
+            assertThat(prefs.cachedAddressFor("mac-a.local").first()).isEqualTo(a)
+            assertThat(prefs.cachedAddressFor("mac-b.local").first()).isEqualTo(b)
+            prefs.saveCachedAddress("mac-a.local", a.copy(address = "10.0.0.20"))
+        }
+        withPreferences { prefs, _ ->
+            assertThat(prefs.cachedAddressFor("mac-a.local").first()?.address).isEqualTo("10.0.0.20")
+            assertThat(prefs.cachedAddressFor("mac-b.local").first()).isEqualTo(b)
+            prefs.removeFingerprint("mac-a.local")
+            assertThat(prefs.cachedAddressFor("mac-a.local").first()).isNull()
+            prefs.saveFingerprint("mac-a.local", a.fingerprint)
+            assertThat(prefs.cachedAddressFor("mac-a.local").first()).isNull()
+        }
+    }
+
+    @Test fun `address cache cannot introduce or change certificate trust`() = runBlocking {
+        val cached = CachedServerAddress("192.168.1.10", "ab".repeat(32))
+        withPreferences { prefs, _ ->
+            prefs.saveCachedAddress("mac.local", cached)
+            assertThat(prefs.cachedAddressFor("mac.local").first()).isNull()
+            assertThat(prefs.fingerprintFor("mac.local").first()).isNull()
+            prefs.saveFingerprint("mac.local", "cd".repeat(32))
+            prefs.saveCachedAddress("mac.local", cached)
+            assertThat(prefs.cachedAddressFor("mac.local").first()).isNull()
+            prefs.saveCachedAddress("mac.local", cached.copy(fingerprint = "cd".repeat(32)))
+            prefs.saveFingerprint("mac.local", "ef".repeat(32))
+            assertThat(prefs.cachedAddressFor("mac.local").first()).isNull()
+        }
+    }
+
+    @Test fun `corrupt address cache is ignored and repaired on the next verified save`() = runBlocking {
+        val cached = CachedServerAddress("192.168.1.10", "ab".repeat(32))
+        withPreferences { prefs, store ->
+            prefs.saveFingerprint("mac.local", cached.fingerprint)
+            store.edit { it[stringPreferencesKey("verified_server_addresses")] = "not json" }
+            assertThat(prefs.cachedAddressFor("mac.local").first()).isNull()
+            prefs.saveCachedAddress("mac.local", cached)
+            assertThat(prefs.cachedAddressFor("mac.local").first()).isEqualTo(cached)
+            prefs.saveCachedAddress("other.local", cached.copy(address = "untrusted.local"))
+            assertThat(prefs.cachedAddressFor("other.local").first()).isNull()
+        }
+    }
 
     @Test fun `manual servers survive closing and reopening the preference store without auto connect`() = runBlocking {
         withPreferences { prefs, _ ->

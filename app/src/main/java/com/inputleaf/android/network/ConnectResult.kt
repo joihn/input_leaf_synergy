@@ -15,6 +15,7 @@ sealed class ConnectResult {
 
     enum class FailureReason {
         NETWORK,
+        NAME_RESOLUTION,
         TLS_AGAINST_PLAIN_SERVER,
         CERTIFICATE_MISMATCH,
         CLIENT_CERT_REQUIRED,

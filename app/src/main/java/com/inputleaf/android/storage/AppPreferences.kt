@@ -6,8 +6,10 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import com.inputleaf.android.network.ConnectionTransportPolicy
+import com.inputleaf.android.network.CachedServerAddress
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import org.json.JSONObject
 
 // internal so instrumented tests can reset app state through the app's own singleton
 internal val Context.dataStore by preferencesDataStore("inputleaf_prefs")
@@ -27,6 +29,7 @@ class AppPreferences internal constructor(private val dataStore: DataStore<Prefe
         private val KEY_KEYBOARD_ENABLED = booleanPreferencesKey("keyboard_enabled")
         private val KEY_FAVORITE_SERVERS = stringPreferencesKey("favorite_servers")
         private val KEY_SAVED_SERVERS = stringSetPreferencesKey("saved_servers")
+        private val KEY_RESOLVED_ADDRESSES = stringPreferencesKey("verified_server_addresses")
         // Fingerprints stored as "ip:fingerprint" joined by newline
         private val KEY_FINGERPRINTS     = stringPreferencesKey("tls_fingerprints")
         private val KEY_TRANSPORT_MODES  = stringPreferencesKey("server_transport_modes")
@@ -183,15 +186,41 @@ class AppPreferences internal constructor(private val dataStore: DataStore<Prefe
         prefs[KEY_FAVORITE_SERVERS] = current.joinToString("\n")
     }
 
-    fun fingerprintFor(ip: String): Flow<String?> =
-        dataStore.data.map { prefs ->
-            prefs[KEY_FINGERPRINTS]?.lines()
-                ?.firstOrNull { it.startsWith("$ip:") }
-                ?.substringAfter(":")
+    private fun storedFingerprint(prefs: Preferences, host: String): String? =
+        prefs[KEY_FINGERPRINTS]?.lines()?.firstOrNull { it.startsWith("$host:") }?.substringAfter(":")
+
+    fun fingerprintFor(ip: String): Flow<String?> = dataStore.data.map { storedFingerprint(it, ip) }
+
+    private fun resolvedAddresses(prefs: Preferences): JSONObject =
+        runCatching { JSONObject(prefs[KEY_RESOLVED_ADDRESSES] ?: "{}") }.getOrElse { JSONObject() }
+
+    fun cachedAddressFor(host: String): Flow<CachedServerAddress?> = dataStore.data.map { prefs ->
+        resolvedAddresses(prefs).optJSONObject(host)?.let { entry ->
+            CachedServerAddress.verified(entry.optString("address"), entry.optString("fingerprint"))
+                ?.takeIf { it.matchesPin(storedFingerprint(prefs, host)) }
         }
+    }
+
+    suspend fun saveCachedAddress(host: String, cached: CachedServerAddress) = dataStore.edit { prefs ->
+        if (CachedServerAddress.isHostname(host) && cached.numericAddress() != null &&
+            cached.matchesPin(storedFingerprint(prefs, host))) {
+            val addresses = resolvedAddresses(prefs)
+            addresses.put(host, JSONObject().put("address", cached.address).put("fingerprint", cached.fingerprint))
+            prefs[KEY_RESOLVED_ADDRESSES] = addresses.toString()
+        }
+    }
+
+    private fun forgetCachedAddress(prefs: MutablePreferences, host: String) {
+        val addresses = resolvedAddresses(prefs)
+        if (addresses.has(host)) {
+            addresses.remove(host)
+            prefs[KEY_RESOLVED_ADDRESSES] = addresses.toString()
+        }
+    }
 
     suspend fun saveFingerprint(ip: String, fingerprint: String) =
         dataStore.edit { prefs ->
+            if (storedFingerprint(prefs, ip) != fingerprint) forgetCachedAddress(prefs, ip)
             val lines = prefs[KEY_FINGERPRINTS]?.lines()?.toMutableList() ?: mutableListOf()
             lines.removeAll { it.startsWith("$ip:") }
             lines.add("$ip:$fingerprint")
@@ -201,6 +230,7 @@ class AppPreferences internal constructor(private val dataStore: DataStore<Prefe
     suspend fun removeFingerprint(ip: String) = dataStore.edit { prefs ->
         // Forgetting trust should not remove the saved server itself.
         rememberServer(prefs, ip)
+        forgetCachedAddress(prefs, ip)
         val lines = prefs[KEY_FINGERPRINTS]?.lines()?.toMutableList() ?: return@edit
         lines.removeAll { it.startsWith("$ip:") }
         prefs[KEY_FINGERPRINTS] = lines.joinToString("\n")

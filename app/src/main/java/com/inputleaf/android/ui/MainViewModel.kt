@@ -56,6 +56,8 @@ internal fun connectionFailureMessage(
     detail: String? = null,
 ): String = when (reason) {
     ConnectResult.FailureReason.NETWORK -> "Could not reach the server"
+    ConnectResult.FailureReason.NAME_RESOLUTION ->
+        "Could not resolve the server hostname. Check the name and local network, or use the server's LAN IP."
     ConnectResult.FailureReason.TLS_AGAINST_PLAIN_SERVER ->
         "Server is not using TLS. Select Auto or Plain only, or enable TLS on the server."
     ConnectResult.FailureReason.CERTIFICATE_MISMATCH ->

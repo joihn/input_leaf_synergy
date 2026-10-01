@@ -260,6 +260,7 @@ class ConnectionService : Service() {
                 pinnedFingerprint = storedFp,
                 transportPolicy = activePolicy,
                 clientCertificate = clientCertificate,
+                cachedAddress = prefs.cachedAddressFor(serverIp).first(),
             ) { cert ->
                 val newFp = TlsFingerprintManager.fingerprintOf(cert)
                 val trusted = when {
@@ -295,6 +296,7 @@ class ConnectionService : Service() {
                     retryAttempt = 0
                     connection = conn
                     prefs.saveTransport(serverIp, result.transport.name.lowercase())
+                    conn.verifiedServerAddress?.let { prefs.saveCachedAddress(serverIp, it) }
                     stateMachine.onHandshaking(serverIp)
                     stateMachine.onIdle(serverIp, screenName)
                     conn.clearHandshakeTimeout()
@@ -895,5 +897,4 @@ class ConnectionStateMachine {
         _state.value = ConnectionState.Disconnected
     }
 }
-
 

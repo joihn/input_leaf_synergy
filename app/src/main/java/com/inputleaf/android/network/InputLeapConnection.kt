@@ -17,8 +17,9 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.DataInputStream
-import java.net.InetSocketAddress
+import java.net.InetAddress
 import java.net.Socket
+import java.net.UnknownHostException
 import java.security.cert.X509Certificate
 import javax.net.ssl.SSLException
 import javax.net.ssl.SSLSocket
@@ -43,10 +44,22 @@ class InputLeapConnection(
     private val pinnedFingerprint: String? = null,
     private val transportPolicy: ConnectionTransportPolicy = ConnectionTransportPolicy.AUTO,
     private val clientCertificate: ClientCertificateMaterial? = null,
+    private val resolveAddresses: (String) -> Array<InetAddress> = InetAddress::getAllByName,
+    private val cachedAddress: CachedServerAddress? = null,
     private val onCertificate: suspend (X509Certificate) -> Boolean,
 ) {
     private val _events = MutableSharedFlow<InputLeapEvent>(replay = 0, extraBufferCapacity = 64)
     val events: SharedFlow<InputLeapEvent> = _events
+
+    /** Set only after TLS identity verification and the complete input-protocol handshake. */
+    var verifiedServerAddress: CachedServerAddress? = null
+        private set
+
+    private val trustedCachedAddress: InetAddress?
+        get() = cachedAddress?.takeIf {
+            transportPolicy != ConnectionTransportPolicy.PLAIN_ONLY &&
+                CachedServerAddress.isHostname(ip) && it.matchesPin(pinnedFingerprint)
+        }?.numericAddress()
 
     private var socket: Socket? = null
     private var writer: ProtocolWriter? = null
@@ -67,12 +80,32 @@ class InputLeapConnection(
         connectMutex.withLock {
             check(socket == null) { "Connection is already open; close it before reconnecting" }
             withContext(Dispatchers.IO) {
+                verifiedServerAddress = null
+                val cachedIp = trustedCachedAddress
+                if (cachedIp != null) {
+                    logD("Trying cached address ${cachedIp.hostAddress} for $ip with pinned TLS")
+                    when (val opened = openTlsSocket({ arrayOf(cachedIp) }, cachedAttempt = true)) {
+                        is SocketOpenResult.Ok -> {
+                            val result = runHandshake(opened.socket, opened.transport, screenName, screenWidth, screenHeight)
+                            if (result is ConnectResult.Ok) {
+                                rememberVerifiedAddress(opened)
+                                return@withContext result
+                            }
+                            if (result is ConnectResult.Failed && result.reason != ConnectResult.FailureReason.HANDSHAKE) {
+                                return@withContext result
+                            }
+                        }
+                        is SocketOpenResult.Rejected -> return@withContext ConnectResult.RejectedByUser
+                        is SocketOpenResult.Failed -> logD("Cached address failed for $ip: ${opened.failure.reason}")
+                    }
+                    logD("Resolving $ip after cached address failed")
+                }
                 val detectedMode =
                     if (
                         transportPolicy == ConnectionTransportPolicy.AUTO &&
                         pinnedFingerprint == null
                     ) {
-                        TransportProber.detect(ip, port)
+                        TransportProber.detect(ip, port, resolveAddresses)
                     } else {
                         null
                     }
@@ -100,6 +133,7 @@ class InputLeapConnection(
                                 screenHeight,
                             )
                             if (result is ConnectResult.Ok) {
+                                rememberVerifiedAddress(opened)
                                 return@withContext result
                             }
                             if (result is ConnectResult.Failed) {
@@ -125,7 +159,7 @@ class InputLeapConnection(
         }
 
     private sealed class SocketOpenResult {
-        data class Ok(val socket: Socket, val transport: ServerTransport) : SocketOpenResult()
+        data class Ok(val socket: Socket, val transport: ServerTransport, val fingerprint: String? = null) : SocketOpenResult()
         data object Rejected : SocketOpenResult()
         data class Failed(val failure: ConnectResult.Failed) : SocketOpenResult()
     }
@@ -138,20 +172,31 @@ class InputLeapConnection(
             } catch (e: Exception) {
                 logW("Plain open failed for $ip: ${e.message}")
                 SocketOpenResult.Failed(
-                    ConnectResult.Failed(ConnectResult.FailureReason.NETWORK, e.message),
+                    networkFailure(e),
                 )
             }
         }
     } catch (e: Exception) {
         SocketOpenResult.Failed(
-            ConnectResult.Failed(ConnectResult.FailureReason.NETWORK, e.message),
+            networkFailure(e),
         )
     }
 
-    private suspend fun openTlsSocket(): SocketOpenResult {
+    private fun rememberVerifiedAddress(opened: SocketOpenResult.Ok) {
+        if (CachedServerAddress.isHostname(ip) && opened.transport == ServerTransport.TLS) {
+            val address = opened.socket.inetAddress.hostAddress ?: return
+            val fingerprint = opened.fingerprint ?: return
+            verifiedServerAddress = CachedServerAddress.verified(address, fingerprint)
+        }
+    }
+
+    private suspend fun openTlsSocket(
+        resolver: (String) -> Array<InetAddress> = resolveAddresses,
+        cachedAttempt: Boolean = false,
+    ): SocketOpenResult {
         var openedSocket: SSLSocket? = null
         val connectTimeout = if (
-            transportPolicy == ConnectionTransportPolicy.AUTO &&
+            cachedAttempt || transportPolicy == ConnectionTransportPolicy.AUTO &&
             preferredTransport == ServerTransport.TLS
         ) {
             TLS_CONNECT_TIMEOUT_CACHED_MS
@@ -160,15 +205,27 @@ class InputLeapConnection(
         }
         return try {
             var capturedCert: X509Certificate? = null
-            val sslContext = TlsFingerprintManager.buildCapturingSSLContext(
-                clientCertificate = clientCertificate,
-                onCertificate = { cert -> capturedCert = cert },
-            )
-            val sslSock = sslContext.socketFactory.createSocket() as SSLSocket
+            // When a trusted routing hint exists, pin during TLS for both the cached and
+            // rediscovered endpoint. A reassigned cafe IP must never show a re-trust prompt.
+            val strictPin = trustedCachedAddress != null
+            val sslContext = if (strictPin) {
+                TlsFingerprintManager.buildPinningSSLContext(checkNotNull(pinnedFingerprint), clientCertificate)
+            } else {
+                TlsFingerprintManager.buildCapturingSSLContext(
+                    clientCertificate = clientCertificate,
+                    onCertificate = { cert -> capturedCert = cert },
+                )
+            }
+            val sslSock = ServerSocketConnector.connect(ip, port, connectTimeout, resolver) {
+                sslContext.socketFactory.createSocket() as SSLSocket
+            }
             openedSocket = sslSock
-            sslSock.connect(InetSocketAddress(ip, port), connectTimeout)
-            sslSock.soTimeout = tlsHandshakeTimeoutMs()
+            logD("TCP connected to $ip at ${sslSock.inetAddress.hostAddress}:$port")
+            // TCP fallback ends here. A failed cached endpoint can trigger hostname
+            // rediscovery, but that attempt must retain the same pin and TLS transport.
+            sslSock.soTimeout = if (cachedAttempt) TLS_HANDSHAKE_TIMEOUT_MS else tlsHandshakeTimeoutMs()
             sslSock.startHandshake()
+            if (strictPin) capturedCert = sslSock.session.peerCertificates.firstOrNull() as? X509Certificate
             sslSock.soTimeout = HANDSHAKE_READ_TIMEOUT_MS
             val cert = capturedCert ?: run {
                 sslSock.close()
@@ -187,7 +244,7 @@ class InputLeapConnection(
                 openedSocket = null
                 return SocketOpenResult.Rejected
             }
-            SocketOpenResult.Ok(sslSock, ServerTransport.TLS)
+            SocketOpenResult.Ok(sslSock, ServerTransport.TLS, fingerprint)
         } catch (e: Exception) {
             runCatching { openedSocket?.close() }
             if (clientCertificate == null && isClientCertificateRequired(e)) {
@@ -215,9 +272,9 @@ class InputLeapConnection(
                     ),
                 )
             } else {
-                logW("TLS open failed for $ip: ${e.message}")
+                logW("TLS open failed for $ip: ${e.javaClass.simpleName}: ${e.message}")
                 SocketOpenResult.Failed(
-                    ConnectResult.Failed(ConnectResult.FailureReason.NETWORK, e.message),
+                    networkFailure(e),
                 )
             }
         }
@@ -242,11 +299,7 @@ class InputLeapConnection(
         } else {
             PLAIN_CONNECT_TIMEOUT_MS
         }
-        // Resolve the destination before touching Socket. Inside Socket.apply,
-        // `port` is Socket.port (0 until connected), not Deskflow's 24800.
-        val destination = InetSocketAddress(ip, port)
-        val socket = Socket()
-        socket.connect(destination, connectTimeout)
+        val socket = ServerSocketConnector.connect(ip, port, connectTimeout, resolveAddresses) { Socket() }
         socket.tcpNoDelay = true
         socket.soTimeout = HANDSHAKE_READ_TIMEOUT_MS
         return socket
@@ -413,6 +466,15 @@ class InputLeapConnection(
     }
 
     companion object {
+        internal fun networkFailure(error: Exception): ConnectResult.Failed {
+            val reason = if (generateSequence<Throwable>(error) { it.cause }.any { it is UnknownHostException }) {
+                ConnectResult.FailureReason.NAME_RESOLUTION
+            } else {
+                ConnectResult.FailureReason.NETWORK
+            }
+            return ConnectResult.Failed(reason, error.message)
+        }
+
         internal fun selectFailureToReport(
             current: ConnectResult.Failed?,
             candidate: ConnectResult.Failed,
@@ -433,7 +495,8 @@ class InputLeapConnection(
             ConnectResult.FailureReason.UNKNOWN_SCREEN,
             ConnectResult.FailureReason.PROTOCOL_ERROR,
             ConnectResult.FailureReason.BUSY -> 4
-            ConnectResult.FailureReason.NETWORK -> 3
+            ConnectResult.FailureReason.NETWORK,
+            ConnectResult.FailureReason.NAME_RESOLUTION -> 3
             ConnectResult.FailureReason.HANDSHAKE -> 2
             ConnectResult.FailureReason.TLS_AGAINST_PLAIN_SERVER -> 1
         }

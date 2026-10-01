@@ -42,6 +42,7 @@ enum class ConnectionTransportPolicy(val storageValue: String) {
     fun shouldRetry(reason: ConnectResult.FailureReason): Boolean =
         this == AUTO && when (reason) {
             ConnectResult.FailureReason.NETWORK,
+            ConnectResult.FailureReason.NAME_RESOLUTION,
             ConnectResult.FailureReason.HANDSHAKE -> true
             ConnectResult.FailureReason.TLS_AGAINST_PLAIN_SERVER,
             ConnectResult.FailureReason.CERTIFICATE_MISMATCH,
@@ -58,6 +59,7 @@ enum class ConnectionTransportPolicy(val storageValue: String) {
             // Only a confirmed "this is not TLS" error should try plaintext.
             ConnectResult.FailureReason.TLS_AGAINST_PLAIN_SERVER -> true
             ConnectResult.FailureReason.NETWORK,
+            ConnectResult.FailureReason.NAME_RESOLUTION,
             ConnectResult.FailureReason.HANDSHAKE,
             ConnectResult.FailureReason.CERTIFICATE_MISMATCH,
             ConnectResult.FailureReason.CLIENT_CERT_REQUIRED,

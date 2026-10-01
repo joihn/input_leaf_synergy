@@ -173,7 +173,7 @@ fun ServerListScreen(
                 OutlinedTextField(
                     value = manualIp,
                     onValueChange = { manualIp = it },
-                    label = { Text("IP Address") },
+                    label = { Text("Hostname or IP address") },
                     singleLine = true
                 )
             },

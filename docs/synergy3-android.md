@@ -73,8 +73,8 @@ After checking the fingerprint against the phone:
    from the display name `android-phone` shown in Synergy's layout editor.
 5. In Input Leaf **Settings → Connection security**, select **TLS only** (Auto
    also supports TLS). This is an app-wide setting, outside the Add Server dialog.
-6. Add the Mac's LAN IP in Input Leaf's **Add Server** dialog. Enter only the IP
-   address, without a port suffix: this APK automatically uses port **24800** and
+6. Add the Mac's LAN IP or Bonjour hostname in Input Leaf's **Add Server** dialog.
+   Enter the address without a port suffix: this APK automatically uses port **24800** and
    does not expose a port selector. Verify the Mac fingerprint in Input Leaf
    against **Synergy Settings → Security (under Advanced) → This computer →
    Fingerprint** before accepting it; see the comparison steps below.
@@ -87,6 +87,67 @@ name; its screen identity and position are retained.
 To undo registration, stop Synergy's service, restore **both** JSON files from
 the printed backup directory, then reopen Synergy. A full restore also reverts
 any subsequent settings changes, so use it before making unrelated edits.
+
+## Use a hostname when the Wi-Fi address changes
+
+Input Leaf accepts hostnames such as `MacBook-A.local` as well as numeric IPs.
+Find the Mac's local hostname with `scutil --get LocalHostName` and append `.local`.
+Keep the phone's **Screen name** unchanged; that is its Synergy identity, not the
+Mac's network address. The first connection using a hostname can prompt for the
+Mac's certificate again because trust is stored per entered address.
+
+Some Macs do not publish usable Bonjour address records until a service is
+advertised. If the hostname cannot be resolved, run this on that Mac:
+
+```sh
+python3 scripts/synergy3_setup.py --advertise
+```
+
+The command registers a Bonjour service for the input port and prints the
+hostname to enter on Android. Keep it running for the first successful TLS
+connection. Input Leaf saves that hostname's last working IP and trusted
+certificate fingerprint; you can then stop the advertisement with Ctrl+C.
+The cache survives app restarts and is separate for each Mac's hostname.
+
+On later connections, Input Leaf first tries the saved IP with pinned TLS,
+without a DNS/Bonjour lookup. If the cached endpoint fails, it resolves the
+hostname again. After changing Wi-Fi, start `--advertise` on the intended primary
+Mac and reconnect to its existing hostname entry on Android. A successful
+connection updates its cached IP; stop the advertisement again if you wish.
+There is no need to type the new IP on the phone.
+
+The helper does not install a login service or modify Synergy's configuration.
+Synergy itself must still be running, with the Mac selected as primary.
+macOS manages the advertisement as network addresses change.
+
+The client tries the addresses returned by the resolver in order. This matters
+because Android can prefer IPv6 while Synergy listens only on IPv4: a failed IPv6
+TCP connection now falls back to IPv4. A stale cached endpoint can trigger a
+fresh hostname lookup, but the saved certificate pin and TLS requirement remain
+in force. A different certificate is rejected without a re-trust prompt or an
+input-protocol exchange. The cache is updated only after the complete TLS and
+input-protocol handshake succeeds. Plaintext connections do not use this cache.
+
+An old café IP may belong to a different device. The certificate binding is what
+makes trying that IP safe; knowing the address alone grants no trust. Check the
+Mac's fingerprint on first connection as described below. Forgetting its trusted
+certificate also clears the cached address. If you intentionally replace the
+Mac's certificate, verify that change on the Mac before forgetting the old trust
+entry and pairing again. Interface-scoped/link-local IPv6 addresses are not
+persisted because their scope is tied to a particular interface; IPv4 and
+unscoped IPv6 can be cached.
+
+Diagnosis on the Pixel 10 found both issues: initially the `.local` name failed
+to resolve even with `adb shell ping`; the temporary Bonjour advertisement made
+it resolve to the Mac's IPv4 address. The app then tried IPv6 and received
+`ECONNREFUSED` because the Synergy listener was IPv4-only. The address fallback
+fix covers that second failure, and unresolvable names now get a specific message.
+
+Bonjour still requires a local network that permits multicast and communication
+between the phone and Mac. If a guest network blocks these, use a numeric LAN
+address when direct connections are allowed. Android's resolver also excludes
+VPN and mobile-data networks from `.local` resolution. See the
+[Android resolver documentation](https://source.android.com/docs/core/ota/modular-system/dns-resolver#mdns-local-resolution).
 
 ## Verify the server fingerprint on the Mac
 
@@ -111,10 +172,10 @@ against the other's connection. It never prints certificate private keys.
 
 ## Switch the primary between two Macs
 
-Add both Macs' LAN IPs in Input Leaf, and connect to the one currently acting as
+Add both Macs' Bonjour hostnames in Input Leaf, and connect to the one currently acting as
 Synergy's primary. Input Leaf has one active input connection and does not follow
 Synergy primary changes automatically; reconnecting continues to use the selected
-IP until you choose a different server.
+hostname until you choose a different server. Each hostname keeps its own verified IP cache.
 
 The phone's screen entry and layout are shared by Synergy, but **trusted client
 certificates are local to each Mac**. Seeing the phone in Mac B's layout does not
@@ -127,7 +188,9 @@ mean Mac B already trusts it. To prepare Mac B once:
    The helper reuses the existing phone identity and position and adds the
    fingerprint to Mac B's local trust store. Do not copy Mac A's `local.json` or
    private certificate to Mac B.
-3. On Android, disconnect from Mac A, add/select Mac B's LAN IP, and connect.
+3. On Android, disconnect from Mac A, start `--advertise` on Mac B, add/select
+   Mac B's hostname, and connect. After a successful TLS connection you can stop
+   the advertisement and reuse the cached IP on later connections.
    Verify Mac B's own server fingerprint against its Synergy Security settings
    before accepting it. Keep the same Input Leaf screen name.
 
