@@ -135,6 +135,12 @@ After both Macs are prepared, changing primary requires selecting that Mac's
 server entry in Input Leaf. Switching back to Mac A uses its original entry and
 previously trusted certificate.
 
+Manually added, used, and favorited server addresses are saved across app restarts,
+including when auto-connect is disabled. Updating this build over the existing
+installation also restores addresses found in older favorites and connection
+records. A server that was only discovered during a scan must be added, used, or
+favorited to keep it after restarting.
+
 Changing the primary does not rearrange the screen layout. If the phone is below
 Mac A, moving off Mac B's bottom edge will not enter the phone. Move through Mac A
 and then down to the phone, or place the phone adjacent to Mac B in Synergy's layout
