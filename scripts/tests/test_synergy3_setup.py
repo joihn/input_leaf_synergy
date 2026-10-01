@@ -1,5 +1,6 @@
 import copy
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -27,6 +28,60 @@ def fixture():
 
 
 class SetupTest(unittest.TestCase):
+    def test_status_uses_live_core_state_not_saved_connected_flag(self):
+        database, local, _ = setup.prepare(*fixture(), 'Phone', FP)
+        settings = database['data']
+        phone = settings['computers'][-1]
+        # The placeholder written at registration is not a live connection status.
+        phone['misc']['connected'] = False
+        settings['serial'] = local['serial']
+        settings['screenStatus'] = {phone['id']: {'core': 'connected', 'serviceReachable': False}}
+        with patch('sys.stdout', new_callable=io.StringIO) as output:
+            setup.show_status(settings, 'Phone')
+        self.assertIn('Keyboard/mouse connection: CONNECTED', output.getvalue())
+        self.assertIn('Synergy desktop management link: not connected (expected for Input Leaf)', output.getvalue())
+        self.assertNotIn(local['serial'], output.getvalue())
+        # Conversely, a stored true flag and reachable service cannot mask a lost input link.
+        phone['misc']['connected'] = True
+        settings['screenStatus'][phone['id']] = {'core': 'disconnected', 'serviceReachable': True}
+        with patch('sys.stdout', new_callable=io.StringIO) as output:
+            setup.show_status(settings, 'Phone')
+        self.assertIn('Keyboard/mouse connection: DISCONNECTED', output.getvalue())
+
+    def test_status_handles_missing_runtime_state_and_requires_unambiguous_device(self):
+        database, _, _ = setup.prepare(*fixture(), 'Phone', FP)
+        settings = database['data']
+        with patch('sys.stdout', new_callable=io.StringIO) as output:
+            setup.show_status(settings, 'Phone')
+        self.assertIn('Keyboard/mouse connection: UNKNOWN', output.getvalue())
+        with self.assertRaises(ValueError): setup.show_status(settings, 'Absent')
+        settings['computers'].append(copy.deepcopy(settings['computers'][-1]))
+        with self.assertRaises(ValueError): setup.show_status(settings, 'Phone')
+        settings['computers'][-1]['isRemoved'] = True
+        with patch('sys.stdout', new_callable=io.StringIO): setup.show_status(settings, 'Phone')
+
+    def test_status_command_needs_no_fingerprint_and_reads_current_screen_name(self):
+        database, _, _ = setup.prepare(*fixture(), 'Phone', FP)
+        settings = database['data']
+        phone = settings['computers'][-1]
+        phone['name'] = 'Renamed Phone'
+        with patch('sys.argv', ['synergy3_setup.py', '--status', '--name', 'Renamed Phone']), \
+             patch.object(setup, 'read_live_settings', return_value=settings), \
+             patch.object(setup, 'apply_changes') as apply, \
+             patch('sys.stdout', new_callable=io.StringIO) as output:
+            setup.main()
+        self.assertIn(setup.core_name(phone), output.getvalue())
+        apply.assert_not_called()
+
+    def test_status_command_reports_unavailable_service_without_dumping_response(self):
+        with patch('sys.argv', ['synergy3_setup.py', '--status']), \
+             patch.object(setup, 'read_live_settings', side_effect=OSError('private diagnostic')), \
+             patch('sys.stderr', new_callable=io.StringIO) as output:
+            with self.assertRaises(SystemExit) as failure: setup.main()
+        self.assertEqual(failure.exception.code, 1)
+        self.assertIn('Start Synergy on the primary Mac', output.getvalue())
+        self.assertNotIn('private diagnostic', output.getvalue())
+
     def test_registration_preserves_other_computers_settings_and_trust(self):
         database, local = fixture()
         original = copy.deepcopy((database, local))

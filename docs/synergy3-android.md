@@ -42,7 +42,10 @@ python3 scripts/synergy3_setup.py \
 
 Choose `above`, `below`, `left`, or `right`. The preview prints the exact core
 screen name to use in Input Leaf, for example `androidphone-c32a6d0e`, and the
-Mac's fingerprint. No files are changed without `--apply`.
+Mac's fingerprint. The final instructions distinguish the Synergy display name
+from the exact value to enter in **Input Leaf → Settings → Screen name**, and
+are also printed after applying or rerunning an existing registration.
+No files are changed without `--apply`.
 
 After checking the fingerprint against the phone:
 
@@ -62,11 +65,16 @@ After checking the fingerprint against the phone:
    Synergy license/settings.** A failed write restores both original files.
 3. Reopen Synergy. It generates the screen layout and trusted-client file from
    the updated settings. You can subsequently move the phone in its layout editor.
-4. Set Input Leaf's **Screen name** to the exact name printed by the helper.
-5. Add the Mac's LAN IP manually in Input Leaf, port **24800**, and choose
-   **TLS only** (Auto also supports TLS). Verify the Mac fingerprint in Input
-   Leaf against Synergy's Security settings before accepting it.
-6. Move the Mac pointer across the configured edge to enter Android.
+4. In Input Leaf **Settings → Screen name**, enter the exact **Input Leaf screen
+   name** printed by the helper, for example `androidphone-c32a6d0e`. This differs
+   from the display name `android-phone` shown in Synergy's layout editor.
+5. In Input Leaf **Settings → Connection security**, select **TLS only** (Auto
+   also supports TLS). This is an app-wide setting, outside the Add Server dialog.
+6. Add the Mac's LAN IP in Input Leaf's **Add Server** dialog. Enter only the IP
+   address, without a port suffix: this APK automatically uses port **24800** and
+   does not expose a port selector. Verify the Mac fingerprint in Input Leaf
+   against Synergy's Security settings before accepting it.
+7. Move the Mac pointer across the configured edge to enter Android.
 
 Rerunning the helper with the same name and fingerprint makes no changes. If you
 regenerate the phone's certificate, rerun with the new fingerprint and the same
@@ -75,6 +83,52 @@ name; its screen identity and position are retained.
 To undo registration, stop Synergy's service, restore **both** JSON files from
 the printed backup directory, then reopen Synergy. A full restore also reverts
 any subsequent settings changes, so use it before making unrelated edits.
+
+## Check the screen name and connection status
+
+With Synergy running on the primary Mac, you can retrieve the current screen
+name and live connection status without providing the fingerprint again:
+
+```sh
+python3 scripts/synergy3_setup.py --status --name android-phone
+```
+
+Use the display name currently shown in Synergy for `--name`. This command only
+reads the local service API and prints the selected phone's status and setup
+instructions. It also works if you have renamed the phone in Synergy; renaming
+changes its core screen name, which must then be updated in Input Leaf.
+
+### Why the Synergy tile can stay gray while input works
+
+Synergy 3.7.2 tracks two independent connections:
+
+- **Core:** the actual keyboard/mouse connection on port 24800. Input Leaf makes
+  this connection, and Synergy correctly reports it as `connected`.
+- **Management service:** Synergy's separate desktop discovery/settings-sync
+  connection. Input Leaf does not implement this service, so Synergy reports
+  `serviceReachable: false`.
+
+The installed GUI colors a tile blue only if the management service is reachable
+and the core is not disconnected. Consequently, an Input Leaf client can have a
+working input connection and still have a gray tile. Hover the tile's Ethernet
+status badge to see **Keyboard/mouse connected**; the separate link badge reports
+management-service reachability. The helper's `--status` reports both explicitly.
+For Input Leaf, an absent management link is expected and is not an input-sharing
+failure. The helper labels it **not connected (expected for Input Leaf)**; use the
+**Keyboard/mouse connection** line to check whether the phone is connected.
+
+This is not a missing input keepalive. Changing the saved `misc.connected` flag
+does not fix it: the service derives runtime status from live connections.
+Management presence requires the separate WebSocket settings-sync protocol,
+including messages signed using the Synergy serial, rather than an extra packet
+on the input connection.
+
+The minimal fix in Synergy's GUI would be to treat `core: connected` as active
+regardless of management reachability, while retaining the separate service badge.
+For a computer whose core status is `unknown` (viewed from a secondary Mac), it
+can retain the existing fallback to management reachability. This branch does not
+modify the installed Synergy application; the native tile color remains a known
+UI limitation.
 
 ## What this branch changes
 
@@ -109,10 +163,11 @@ Input Leap/Deskflow tests. The setup helper has standalone tests for preservatio
 idempotency, certificate replacement, private backups, failed-write recovery,
 and refusal while the service is running.
 
-No physical Android/Shizuku end-to-end test has been performed. Other Synergy 3.x
-versions, Windows/Linux Synergy setup, clipboard/file transfer, and participation
-in Synergy's management-service discovery are outside the verified scope. This
-is direct input-protocol compatibility with an explicit desktop setup step.
+The user confirmed successful connection, screen-edge switching, and working
+input on a Pixel 10 using this branch. Other Synergy 3.x versions, Windows/Linux
+Synergy setup, clipboard/file transfer, and participation in Synergy's
+management-service discovery are outside the verified scope. This is direct
+input-protocol compatibility with an explicit desktop setup step.
 
 ## Development and reproduction
 

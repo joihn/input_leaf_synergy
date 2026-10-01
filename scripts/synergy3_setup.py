@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Register an Input Leaf client in a stopped Synergy 3.7 service (macOS).
+"""Register an Input Leaf client or inspect its Synergy 3.7 connection (macOS).
 
-Dry-run by default. Never reads or copies certificate private keys, and never
+Registration requires a stopped service to apply; --status reads the running
+service. Dry-run by default. Never reads or copies certificate private keys, and never
 prints the settings database (which also contains the Synergy license).
 """
 import argparse
@@ -14,6 +15,10 @@ import re
 import subprocess
 import tempfile
 import time
+from urllib.request import urlopen
+
+
+SETTINGS_URL = "http://127.0.0.1:24803/v1/settings"
 
 
 def fingerprint(value):
@@ -27,6 +32,47 @@ def core_name(computer):
     name = re.sub(r"[^a-zA-Z0-9]", "", computer["name"]).lower()
     suffix = computer["id"][-8:]
     return f"{name}-{suffix}" if name else suffix
+
+
+def show_phone_settings(name, screen):
+    print()
+    print(f"Synergy display name: {name}")
+    print("On Android, open Input Leaf → Settings → Screen name and enter exactly:")
+    print(f"    {screen}")
+    print("The Synergy display name and Input Leaf screen name are different.")
+    print("Input Leaf → Settings → Connection security: TLS only (Auto also works).")
+    print("Add Server: enter this Mac's LAN IP only; port 24800 is automatic.")
+
+
+def show_status(settings, name):
+    """Report live core status, never the persisted misc.connected placeholder."""
+    matches = [c for c in settings["computers"]
+               if c["name"] == name and not c.get("isRemoved")]
+    if len(matches) != 1:
+        raise ValueError("Expected one registered phone with that display name; check --name.")
+    phone = matches[0]
+    status = settings.get("screenStatus", {}).get(phone["id"], {})
+    core = status.get("core", "unknown")
+    labels = {"connected": "CONNECTED", "disconnected": "DISCONNECTED", "unknown": "UNKNOWN"}
+    print(f"Keyboard/mouse connection: {labels.get(core, 'UNKNOWN')}")
+    reachable = status.get("serviceReachable")
+    if reachable is True:
+        service_label = "connected"
+    elif reachable is False:
+        service_label = "not connected (expected for Input Leaf)"
+    else:
+        service_label = "unknown"
+    print(f"Synergy desktop management link: {service_label}")
+    if core == "connected" and reachable is False:
+        print("Keyboard/mouse sharing is connected. The missing desktop management link only explains the gray Synergy tile; no action is needed for input sharing.")
+    elif core == "unknown" or core not in labels:
+        print("Run this command on the primary Mac to see the input connection status.")
+    show_phone_settings(phone["name"], core_name(phone))
+
+
+def read_live_settings():
+    with urlopen(SETTINGS_URL, timeout=5) as response:
+        return json.load(response)["data"]
 
 
 def overlaps(a, b):
@@ -138,15 +184,25 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config-dir", type=Path, default=Path.home() / "Library/Preferences/Synergy")
     parser.add_argument("--name", default="android-phone", help="Display name for the phone in Synergy")
-    parser.add_argument("--fingerprint", required=True, help="Full SHA-256 fingerprint shown by Input Leaf")
+    parser.add_argument("--fingerprint", help="Full SHA-256 fingerprint shown by Input Leaf; required for registration")
     parser.add_argument("--side", choices=("below", "above", "left", "right"), default="below")
-    parser.add_argument("--apply", action="store_true", help="Write backed-up settings; requires a stopped Synergy service")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--apply", action="store_true", help="Write backed-up settings; requires a stopped Synergy service")
+    mode.add_argument("--status", action="store_true", help="Show live input status and the exact screen name from the running local Synergy service")
     args = parser.parse_args()
+    if not args.status and not args.fingerprint:
+        parser.error("--fingerprint is required for registration (or use --status to inspect an existing phone)")
     try:
+        if args.status:
+            try:
+                settings = read_live_settings()
+            except (OSError, ValueError, KeyError) as error:
+                raise ValueError("Cannot read the local Synergy service. Start Synergy on the primary Mac and retry.") from error
+            show_status(settings, args.name)
+            return
         originals = {name: (args.config_dir / name).read_bytes() for name in ("db.json", "local.json")}
         database, local = (json.loads(originals[name]) for name in ("db.json", "local.json"))
         updated, updated_local, screen = prepare(database, local, args.name, args.fingerprint, args.side)
-        print(f"Input Leaf screen name: {screen}")
         print(f"Phone SHA-256: {fingerprint(args.fingerprint)}")
         primary = next(c for c in database["data"]["computers"] if c["id"] == local["myId"])
         print(f"Server SHA-256: {primary['misc'].get('tlsFingerprint', 'Check Synergy Security settings')}")
@@ -155,11 +211,13 @@ def main():
         elif args.apply:
             backup = apply_changes(args.config_dir, originals, {"db.json": updated, "local.json": updated_local})
             print(f"Saved. Backup: {backup}")
-            print("Start Synergy, set the screen name above in Input Leaf, then connect to this Mac on port 24800.")
+            print("Start Synergy, then complete the phone settings below.")
         else:
             print("Preview only. After verifying the phone fingerprint, stop Synergy's service and rerun with --apply.")
+        show_phone_settings(args.name, screen)
     except (OSError, ValueError, KeyError, StopIteration, subprocess.SubprocessError) as error:
-        parser.exit(1, f"Cannot register phone: {error}\n")
+        action = "read status" if args.status else "register phone"
+        parser.exit(1, f"Cannot {action}: {error}\n")
 
 
 if __name__ == "__main__":

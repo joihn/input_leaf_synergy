@@ -85,8 +85,8 @@ When your mouse crosses the configured border of your desktop monitor, the serve
 
 For a Mac running **Synergy 3.7.2**, use the [Synergy 3 setup guide](docs/synergy3-android.md).
 It includes registration of the Android screen and its TLS fingerprint, plus the
-Shizuku setup. This requires a build from this branch; physical Android validation
-is still pending.
+Shizuku setup. This requires a build from this branch; a user has confirmed working
+input and screen-edge switching on a Pixel 10.
 
 ### 1. Install Server on your PC
 Download and install either:
